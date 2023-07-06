@@ -67,8 +67,8 @@ var _ = Describe("Validation", func() {
 				"aws.vmMemoryOverheadPercent":    "0.1",
 				"aws.tags":                       `{"tag1": "value1", "tag2": "value2", "example.com/tag": "my-value"}`,
 				"aws.reservedENIs":               "1",
-				"aws.SpotPriceMultiplier":        "2",
-				"aws.OnDemandPriceMultiplier":    "0.5",
+				"aws.spotPriceMultiplier":        "2",
+				"aws.onDemandPriceMultiplier":    "0.5",
 			},
 		}
 		ctx, err := (&settings.Settings{}).Inject(ctx, cm)

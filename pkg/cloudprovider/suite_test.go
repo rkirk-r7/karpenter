@@ -441,7 +441,7 @@ var _ = Describe("CloudProvider", func() {
 					ExpectApplied(ctx, env.Client, updatedAWSNodeTemplate)
 					isDrifted, err = cloudProvider.IsMachineDrifted(ctx, machine)
 					Expect(err).NotTo(HaveOccurred())
-					Expect(isDrifted).To(Equal(cloudprovider.NodeTemplateStaticDrift))
+					Expect(isDrifted).To(Equal(cloudprovider.NodeTemplateDrift))
 				},
 				Entry("InstanceProfile Drift", v1alpha1.AWSNodeTemplateSpec{AWS: v1alpha1.AWS{InstanceProfile: aws.String("profile-2")}}),
 				Entry("UserData Drift", v1alpha1.AWSNodeTemplateSpec{UserData: aws.String("userdata-test-2")}),
@@ -703,6 +703,30 @@ var _ = Describe("CloudProvider", func() {
 			ExpectScheduled(ctx, env.Client, podSubnet2)
 			createFleetInput = awsEnv.EC2API.CreateFleetBehavior.CalledWithInput.Pop()
 			Expect(fake.SubnetsFromFleetRequest(createFleetInput)).To(ConsistOf("test-subnet-2"))
+		})
+		It("should launch instances with an alternate provisioner when an awsnodetemplate selects 0 subnets, security groups, or amis", func() {
+			misconfiguredNodeTemplate := test.AWSNodeTemplate(v1alpha1.AWSNodeTemplateSpec{
+				AWS: v1alpha1.AWS{
+					// select nothing!
+					SubnetSelector: map[string]string{"Name": "nothing"},
+					// select nothing!
+					SecurityGroupSelector: map[string]string{"Name": "nothing"},
+				},
+				// select nothing!
+				AMISelector: map[string]string{"Name": "nothing"},
+			})
+			prov2 := test.Provisioner(coretest.ProvisionerOptions{
+				ProviderRef: &v1alpha5.MachineTemplateRef{
+					APIVersion: misconfiguredNodeTemplate.APIVersion,
+					Kind:       misconfiguredNodeTemplate.Kind,
+					// select nothing!
+					Name: "nothing",
+				},
+			})
+			ExpectApplied(ctx, env.Client, provisioner, prov2, nodeTemplate, misconfiguredNodeTemplate)
+			pod := coretest.UnschedulablePod()
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			ExpectScheduled(ctx, env.Client, pod)
 		})
 	})
 })

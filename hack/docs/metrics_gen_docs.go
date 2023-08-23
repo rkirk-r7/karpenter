@@ -267,7 +267,8 @@ func getIdentMapping(identName string) (string, error) {
 		"metrics.Namespace": metrics.Namespace,
 		"Namespace":         metrics.Namespace,
 
-		"nodeSubsystem":           "nodes",
+		"NodeSubsystem":           "nodes",
+		"metrics.NodeSubsystem":   "nodes",
 		"machineSubsystem":        "machines",
 		"nodeClaimSubsystem":      "nodeclaims",
 		"interruptionSubsystem":   "interruption",

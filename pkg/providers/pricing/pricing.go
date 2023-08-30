@@ -19,6 +19,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/aws/karpenter/pkg/apis/settings"
 	"net/http"
 	"strconv"
 	"strings"
@@ -46,10 +47,12 @@ import (
 // fails, the previous pricing information is retained and used which may be the static initial pricing data if pricing
 // updates never succeed.
 type Provider struct {
-	ec2     ec2iface.EC2API
-	pricing pricingiface.PricingAPI
-	region  string
-	cm      *pretty.ChangeMonitor
+	ec2                     ec2iface.EC2API
+	pricing                 pricingiface.PricingAPI
+	region                  string
+	cm                      *pretty.ChangeMonitor
+	spotPriceMultiplier     float64
+	onDemandPriceMultiplier float64
 
 	mu                 sync.RWMutex
 	onDemandUpdateTime time.Time
@@ -93,12 +96,14 @@ func NewAPI(sess *session.Session, region string) pricingiface.PricingAPI {
 	return pricing.New(sess, &aws.Config{Region: aws.String(pricingAPIRegion)})
 }
 
-func NewProvider(_ context.Context, pricing pricingiface.PricingAPI, ec2Api ec2iface.EC2API, region string) *Provider {
+func NewProvider(ctx context.Context, pricing pricingiface.PricingAPI, ec2Api ec2iface.EC2API, region string) *Provider {
 	p := &Provider{
-		region:  region,
-		ec2:     ec2Api,
-		pricing: pricing,
-		cm:      pretty.NewChangeMonitor(),
+		region:                  region,
+		ec2:                     ec2Api,
+		pricing:                 pricing,
+		cm:                      pretty.NewChangeMonitor(),
+		spotPriceMultiplier:     settings.FromContext(ctx).SpotPriceMultiplier,
+		onDemandPriceMultiplier: settings.FromContext(ctx).OnDemandPriceMultiplier,
 	}
 	// sets the pricing data from the static default state for the provider
 	p.Reset()
@@ -311,7 +316,7 @@ func (p *Provider) onDemandPage(prices map[string]float64) func(output *pricing.
 					if err != nil || price == 0 {
 						continue
 					}
-					prices[pItem.Product.Attributes.InstanceType] = price
+					prices[pItem.Product.Attributes.InstanceType] = price * p.onDemandPriceMultiplier
 				}
 			}
 		}
@@ -370,7 +375,7 @@ func (p *Provider) UpdateSpotPricing(ctx context.Context) error {
 			p.spotPrices[it] = newZonalPricing(0)
 		}
 		for zone, price := range zoneData {
-			p.spotPrices[it].prices[zone] = price
+			p.spotPrices[it].prices[zone] = price * p.spotPriceMultiplier
 		}
 		totalOfferings += len(zoneData)
 	}
@@ -408,6 +413,13 @@ func (p *Provider) Reset() {
 		staticPricing = initialOnDemandPrices["us-east-1"]
 	}
 
+	if p.onDemandPriceMultiplier != 1.0 {
+		staticPricing = lo.MapEntries(staticPricing, func(instanceType string, price float64) (string, float64) {
+			return instanceType, price * p.onDemandPriceMultiplier
+		})
+	}
+
+	//p.onDemandPrices = staticPricing
 	p.onDemandPrices = staticPricing
 	// default our spot pricing to the same as the on-demand pricing until a price update
 	p.spotPrices = populateInitialSpotPricing(staticPricing)

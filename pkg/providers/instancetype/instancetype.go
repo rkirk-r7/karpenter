@@ -129,6 +129,8 @@ func (p *Provider) LivenessProbe(req *http.Request) error {
 
 func (p *Provider) createOfferings(ctx context.Context, instanceType *ec2.InstanceTypeInfo, zones sets.Set[string]) []cloudprovider.Offering {
 	var offerings []cloudprovider.Offering
+	//var spotPriceMultiplier = settings.FromContext(ctx).SpotPriceMultiplier
+	//var onDemandPriceMultiplier = settings.FromContext(ctx).OnDemandPriceMultiplier
 	for zone := range zones {
 		// while usage classes should be a distinct set, there's no guarantee of that
 		for capacityType := range sets.NewString(aws.StringValueSlice(instanceType.SupportedUsageClasses)...) {
@@ -139,8 +141,10 @@ func (p *Provider) createOfferings(ctx context.Context, instanceType *ec2.Instan
 			switch capacityType {
 			case ec2.UsageClassTypeSpot:
 				price, ok = p.pricingProvider.SpotPrice(*instanceType.InstanceType, zone)
+				//price = price * spotPriceMultiplier
 			case ec2.UsageClassTypeOnDemand:
 				price, ok = p.pricingProvider.OnDemandPrice(*instanceType.InstanceType)
+				//price = price * onDemandPriceMultiplier
 			default:
 				logging.FromContext(ctx).Errorf("Received unknown capacity type %s for instance type %s", capacityType, *instanceType.InstanceType)
 				continue

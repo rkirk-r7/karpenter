@@ -440,6 +440,78 @@ var _ = Describe("Instance Types", func() {
 			Expect(spotPrice).To(BeNumerically("<", cheapestODPrice))
 		}
 	})
+	It("should order the instance types by price and only consider the spot types that are cheaper than the cheapest on-demand with modifier", func() {
+		ctx = settings.ToContext(ctx, test.Settings(test.SettingOptions{
+			OnDemandPriceMultiplier: lo.ToPtr(0.3),
+			SpotPriceMultiplier:     lo.ToPtr(2.0),
+		}))
+
+		instances := makeFakeInstances()
+		awsEnv.EC2API.DescribeInstanceTypesOutput.Set(&ec2.DescribeInstanceTypesOutput{
+			InstanceTypes: makeFakeInstances(),
+		})
+		awsEnv.EC2API.DescribeInstanceTypeOfferingsOutput.Set(&ec2.DescribeInstanceTypeOfferingsOutput{
+			InstanceTypeOfferings: makeFakeInstanceOfferings(instances),
+		})
+
+		provisioner.Spec.Requirements = []v1.NodeSelectorRequirement{
+			{
+				Key:      v1alpha5.LabelCapacityType,
+				Operator: v1.NodeSelectorOpIn,
+				Values: []string{
+					v1alpha5.CapacityTypeSpot,
+					v1alpha5.CapacityTypeOnDemand,
+				},
+			},
+		}
+
+		ExpectApplied(ctx, env.Client, provisioner, nodeTemplate)
+		awsEnv.EC2API.DescribeSpotPriceHistoryOutput.Set(generateSpotPricing(cloudProvider, provisioner))
+		Expect(awsEnv.PricingProvider.UpdateSpotPricing(ctx)).To(Succeed())
+
+		pod := coretest.UnschedulablePod(coretest.PodOptions{
+			ResourceRequirements: v1.ResourceRequirements{
+				Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1")},
+				Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("1")},
+			},
+		})
+		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+		ExpectScheduled(ctx, env.Client, pod)
+
+		its, err := cloudProvider.GetInstanceTypes(ctx, provisioner)
+		Expect(err).To(BeNil())
+		// Order all the instances by their price
+		// We need some way to deterministically order them if their prices match
+		reqs := scheduling.NewNodeSelectorRequirements(provisioner.Spec.Requirements...)
+		sort.Slice(its, func(i, j int) bool {
+			iPrice := its[i].Offerings.Requirements(reqs).Cheapest().Price
+			jPrice := its[j].Offerings.Requirements(reqs).Cheapest().Price
+			if iPrice == jPrice {
+				return its[i].Name < its[j].Name
+			}
+			return iPrice < jPrice
+		})
+
+		Expect(awsEnv.EC2API.CreateFleetBehavior.CalledWithInput.Len()).To(Equal(1))
+		call := awsEnv.EC2API.CreateFleetBehavior.CalledWithInput.Pop()
+		Expect(call.LaunchTemplateConfigs).To(HaveLen(1))
+
+		// find the cheapest OD price that works
+		cheapestODPrice := math.MaxFloat64
+		for _, override := range call.LaunchTemplateConfigs[0].Overrides {
+			odPrice, ok := awsEnv.PricingProvider.OnDemandPrice(*override.InstanceType)
+			Expect(ok).To(BeTrue())
+			if odPrice < cheapestODPrice {
+				cheapestODPrice = odPrice
+			}
+		}
+		// and our spot prices should be cheaper than the OD price
+		for _, override := range call.LaunchTemplateConfigs[0].Overrides {
+			spotPrice, ok := awsEnv.PricingProvider.SpotPrice(*override.InstanceType, *override.AvailabilityZone)
+			Expect(ok).To(BeTrue())
+			Expect(spotPrice).To(BeNumerically(">", cheapestODPrice))
+		}
+	})
 	It("should de-prioritize metal", func() {
 		ExpectApplied(ctx, env.Client, provisioner, nodeTemplate)
 		pod := coretest.UnschedulablePod(coretest.PodOptions{

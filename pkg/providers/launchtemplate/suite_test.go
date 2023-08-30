@@ -88,7 +88,8 @@ var _ = BeforeSuite(func() {
 	awsEnv = test.NewEnvironment(ctx, env)
 
 	fakeClock = &clock.FakeClock{}
-	cloudProvider = cloudprovider.New(awsEnv.InstanceTypesProvider, awsEnv.InstanceProvider, env.Client, awsEnv.AMIProvider, awsEnv.SecurityGroupProvider, awsEnv.SubnetProvider)
+	cloudProvider = cloudprovider.New(awsEnv.InstanceTypesProvider, awsEnv.InstanceProvider, events.NewRecorder(&record.FakeRecorder{}),
+		env.Client, awsEnv.AMIProvider, awsEnv.SecurityGroupProvider, awsEnv.SubnetProvider)
 	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
 	prov = provisioning.NewProvisioner(env.Client, env.KubernetesInterface.CoreV1(), events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster)
 })
@@ -1132,6 +1133,17 @@ var _ = Describe("LaunchTemplates", func() {
 			ExpectScheduled(ctx, env.Client, pod)
 			ExpectLaunchTemplatesCreatedWithUserDataContaining("--cpu-cfs-quota=false")
 		})
+		It("should not pass any labels prefixed with the node-restriction.kubernetes.io domain", func() {
+			provisioner.Spec.Labels = lo.Assign(provisioner.Spec.Labels, map[string]string{
+				v1.LabelNamespaceNodeRestriction + "/team":         "team-1",
+				v1.LabelNamespaceNodeRestriction + "/custom-label": "custom-value",
+			})
+			ExpectApplied(ctx, env.Client, provisioner, nodeTemplate)
+			pod := coretest.UnschedulablePod()
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			ExpectScheduled(ctx, env.Client, pod)
+			ExpectLaunchTemplatesCreatedWithUserDataNotContaining(v1.LabelNamespaceNodeRestriction)
+		})
 		Context("Bottlerocket", func() {
 			It("should merge in custom user data", func() {
 				ctx = settings.ToContext(ctx, test.Settings(test.SettingOptions{
@@ -1791,6 +1803,17 @@ func ExpectLaunchTemplatesCreatedWithUserDataContaining(substrings ...string) {
 		Expect(err).To(BeNil())
 		for _, substring := range substrings {
 			Expect(string(userData)).To(ContainSubstring(substring))
+		}
+	})
+}
+
+func ExpectLaunchTemplatesCreatedWithUserDataNotContaining(substrings ...string) {
+	Expect(awsEnv.EC2API.CalledWithCreateLaunchTemplateInput.Len()).To(BeNumerically(">=", 1))
+	awsEnv.EC2API.CalledWithCreateLaunchTemplateInput.ForEach(func(input *ec2.CreateLaunchTemplateInput) {
+		userData, err := base64.StdEncoding.DecodeString(*input.LaunchTemplateData.UserData)
+		Expect(err).To(BeNil())
+		for _, substring := range substrings {
+			Expect(string(userData)).ToNot(ContainSubstring(substring))
 		}
 	})
 }

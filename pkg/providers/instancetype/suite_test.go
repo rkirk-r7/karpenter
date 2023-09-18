@@ -446,7 +446,7 @@ var _ = Describe("Instance Types", func() {
 	It("should order the instance types by price and only consider the spot types that are cheaper than the cheapest on-demand with modifier", func() {
 		ctx = settings.ToContext(ctx, test.Settings(test.SettingOptions{
 			OnDemandPriceMultiplier: lo.ToPtr(0.3),
-			SpotPriceMultiplier:     lo.ToPtr(2.0),
+			SpotPriceMultiplier:     lo.ToPtr(3.0),
 		}))
 
 		instances := makeFakeInstances()
@@ -481,7 +481,7 @@ var _ = Describe("Instance Types", func() {
 		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 		ExpectScheduled(ctx, env.Client, pod)
 
-		its, err := cloudProvider.GetInstanceTypes(ctx, provisioner)
+		its, err := cloudProvider.GetInstanceTypes(ctx, nodepoolutil.New(provisioner))
 		Expect(err).To(BeNil())
 		// Order all the instances by their price
 		// We need some way to deterministically order them if their prices match

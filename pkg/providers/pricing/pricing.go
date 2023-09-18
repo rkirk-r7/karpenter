@@ -47,12 +47,10 @@ import (
 // fails, the previous pricing information is retained and used which may be the static initial pricing data if pricing
 // updates never succeed.
 type Provider struct {
-	ec2                     ec2iface.EC2API
-	pricing                 pricingiface.PricingAPI
-	region                  string
-	cm                      *pretty.ChangeMonitor
-	spotPriceMultiplier     float64
-	onDemandPriceMultiplier float64
+	ec2     ec2iface.EC2API
+	pricing pricingiface.PricingAPI
+	region  string
+	cm      *pretty.ChangeMonitor
 
 	mu                 sync.RWMutex
 	onDemandUpdateTime time.Time
@@ -100,12 +98,10 @@ func NewAPI(sess *session.Session, region string) pricingiface.PricingAPI {
 
 func NewProvider(ctx context.Context, pricing pricingiface.PricingAPI, ec2Api ec2iface.EC2API, region string) *Provider {
 	p := &Provider{
-		region:                  region,
-		ec2:                     ec2Api,
-		pricing:                 pricing,
-		cm:                      pretty.NewChangeMonitor(),
-		spotPriceMultiplier:     settings.FromContext(ctx).SpotPriceMultiplier,
-		onDemandPriceMultiplier: settings.FromContext(ctx).OnDemandPriceMultiplier,
+		region:  region,
+		ec2:     ec2Api,
+		pricing: pricing,
+		cm:      pretty.NewChangeMonitor(),
 	}
 	// sets the pricing data from the static default state for the provider
 	p.Reset()
@@ -267,7 +263,7 @@ func (p *Provider) fetchOnDemandPricing(ctx context.Context, additionalFilters .
 		additionalFilters...)
 	if err := p.pricing.GetProductsPagesWithContext(ctx, &pricing.GetProductsInput{
 		Filters:     filters,
-		ServiceCode: aws.String("AmazonEC2")}, p.onDemandPage(prices)); err != nil {
+		ServiceCode: aws.String("AmazonEC2")}, p.onDemandPage(ctx, prices)); err != nil {
 		return nil, err
 	}
 	return prices, nil
@@ -276,7 +272,7 @@ func (p *Provider) fetchOnDemandPricing(ctx context.Context, additionalFilters .
 // turning off cyclo here, it measures as a 12 due to all of the type checks of the pricing data which returns a deeply
 // nested map[string]interface{}
 // nolint: gocyclo
-func (p *Provider) onDemandPage(prices map[string]float64) func(output *pricing.GetProductsOutput, b bool) bool {
+func (p *Provider) onDemandPage(ctx context.Context, prices map[string]float64) func(output *pricing.GetProductsOutput, b bool) bool {
 	// this isn't the full pricing struct, just the portions we care about
 	type priceItem struct {
 		Product struct {
@@ -292,6 +288,8 @@ func (p *Provider) onDemandPage(prices map[string]float64) func(output *pricing.
 			}
 		}
 	}
+
+	onDemandPriceMultiplier := settings.FromContext(ctx).OnDemandPriceMultiplier
 
 	return func(output *pricing.GetProductsOutput, b bool) bool {
 		currency := "USD"
@@ -318,7 +316,7 @@ func (p *Provider) onDemandPage(prices map[string]float64) func(output *pricing.
 					if err != nil || price == 0 {
 						continue
 					}
-					prices[pItem.Product.Attributes.InstanceType] = price * p.onDemandPriceMultiplier
+					prices[pItem.Product.Attributes.InstanceType] = price * onDemandPriceMultiplier
 				}
 			}
 		}
@@ -331,6 +329,8 @@ func (p *Provider) UpdateSpotPricing(ctx context.Context) error {
 	totalOfferings := 0
 
 	prices := map[string]map[string]float64{}
+	spotPriceMultiplier := settings.FromContext(ctx).SpotPriceMultiplier
+
 	err := p.ec2.DescribeSpotPriceHistoryPagesWithContext(ctx, &ec2.DescribeSpotPriceHistoryInput{
 		ProductDescriptions: []*string{aws.String("Linux/UNIX"), aws.String("Linux/UNIX (Amazon VPC)")},
 		// get the latest spot price for each instance type
@@ -377,7 +377,7 @@ func (p *Provider) UpdateSpotPricing(ctx context.Context) error {
 			p.spotPrices[it] = newZonalPricing(0)
 		}
 		for zone, price := range zoneData {
-			p.spotPrices[it].prices[zone] = price * p.spotPriceMultiplier
+			p.spotPrices[it].prices[zone] = price * spotPriceMultiplier
 		}
 		totalOfferings += len(zoneData)
 	}
@@ -415,13 +415,6 @@ func (p *Provider) Reset() {
 		staticPricing = initialOnDemandPrices["us-east-1"]
 	}
 
-	if p.onDemandPriceMultiplier != 1.0 {
-		staticPricing = lo.MapEntries(staticPricing, func(instanceType string, price float64) (string, float64) {
-			return instanceType, price * p.onDemandPriceMultiplier
-		})
-	}
-
-	//p.onDemandPrices = staticPricing
 	p.onDemandPrices = staticPricing
 	// default our spot pricing to the same as the on-demand pricing until a price update
 	p.spotPrices = populateInitialSpotPricing(staticPricing)

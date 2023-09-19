@@ -443,7 +443,7 @@ var _ = Describe("Instance Types", func() {
 			Expect(spotPrice).To(BeNumerically("<", cheapestODPrice))
 		}
 	})
-	It("should order the instance types by price and only consider the spot types that are cheaper than the cheapest on-demand with modifier", func() {
+	It("should order the instance types by price and only consider the on-demand types that are cheaper than the cheapest spot due to modifier", func() {
 		ctx = settings.ToContext(ctx, test.Settings(test.SettingOptions{
 			OnDemandPriceMultiplier: lo.ToPtr(0.3),
 			SpotPriceMultiplier:     lo.ToPtr(3.0),
@@ -508,7 +508,7 @@ var _ = Describe("Instance Types", func() {
 				cheapestODPrice = odPrice
 			}
 		}
-		// and our spot prices should be cheaper than the OD price
+		// and our spot prices should be more expensive than the OD price
 		for _, override := range call.LaunchTemplateConfigs[0].Overrides {
 			spotPrice, ok := awsEnv.PricingProvider.SpotPrice(*override.InstanceType, *override.AvailabilityZone)
 			Expect(ok).To(BeTrue())

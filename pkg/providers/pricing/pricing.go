@@ -96,7 +96,7 @@ func NewAPI(sess *session.Session, region string) pricingiface.PricingAPI {
 	return pricing.New(sess, &aws.Config{Region: aws.String(pricingAPIRegion)})
 }
 
-func NewProvider(ctx context.Context, pricing pricingiface.PricingAPI, ec2Api ec2iface.EC2API, region string) *Provider {
+func NewProvider(_ context.Context, pricing pricingiface.PricingAPI, ec2Api ec2iface.EC2API, region string) *Provider {
 	p := &Provider{
 		region:  region,
 		ec2:     ec2Api,
@@ -347,6 +347,7 @@ func (p *Provider) UpdateSpotPricing(ctx context.Context) error {
 			if sph.Timestamp == nil {
 				continue
 			}
+			spotPrice *= spotPriceMultiplier
 			instanceType := aws.StringValue(sph.InstanceType)
 			az := aws.StringValue(sph.AvailabilityZone)
 			_, ok := prices[instanceType]
@@ -377,7 +378,7 @@ func (p *Provider) UpdateSpotPricing(ctx context.Context) error {
 			p.spotPrices[it] = newZonalPricing(0)
 		}
 		for zone, price := range zoneData {
-			p.spotPrices[it].prices[zone] = price * spotPriceMultiplier
+			p.spotPrices[it].prices[zone] = price
 		}
 		totalOfferings += len(zoneData)
 	}

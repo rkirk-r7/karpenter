@@ -146,6 +146,9 @@ func (p *Provider) createOfferings(ctx context.Context, instanceType *ec2.Instan
 				continue
 			}
 			available := !isUnavailable && ok
+			if available {
+				logging.FromContext(ctx).Info(fmt.Sprintf("%s %s: %.5f", *instanceType.InstanceType, capacityType, price))
+			}
 			offerings = append(offerings, cloudprovider.Offering{
 				Zone:         zone,
 				CapacityType: capacityType,

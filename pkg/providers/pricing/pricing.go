@@ -19,6 +19,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/aws/karpenter/pkg/apis/settings"
 	"net/http"
 	"strconv"
@@ -290,6 +291,7 @@ func (p *Provider) onDemandPage(ctx context.Context, prices map[string]float64) 
 	}
 
 	onDemandPriceMultiplier := settings.FromContext(ctx).OnDemandPriceMultiplier
+	logging.FromContext(ctx).Info(fmt.Sprintf("Updating OnDemand Pricing: %.3f", onDemandPriceMultiplier))
 
 	return func(output *pricing.GetProductsOutput, b bool) bool {
 		currency := "USD"
@@ -316,7 +318,7 @@ func (p *Provider) onDemandPage(ctx context.Context, prices map[string]float64) 
 					if err != nil || price == 0 {
 						continue
 					}
-					prices[pItem.Product.Attributes.InstanceType] = price * onDemandPriceMultiplier
+					prices[pItem.Product.Attributes.InstanceType] = price //* onDemandPriceMultiplier
 				}
 			}
 		}
@@ -330,6 +332,8 @@ func (p *Provider) UpdateSpotPricing(ctx context.Context) error {
 
 	prices := map[string]map[string]float64{}
 	spotPriceMultiplier := settings.FromContext(ctx).SpotPriceMultiplier
+
+	logging.FromContext(ctx).Info(fmt.Sprintf("Updating Spot Pricing: %.3f", spotPriceMultiplier))
 
 	err := p.ec2.DescribeSpotPriceHistoryPagesWithContext(ctx, &ec2.DescribeSpotPriceHistoryInput{
 		ProductDescriptions: []*string{aws.String("Linux/UNIX"), aws.String("Linux/UNIX (Amazon VPC)")},
@@ -347,7 +351,7 @@ func (p *Provider) UpdateSpotPricing(ctx context.Context) error {
 			if sph.Timestamp == nil {
 				continue
 			}
-			spotPrice *= spotPriceMultiplier
+			//spotPrice *= spotPriceMultiplier
 			instanceType := aws.StringValue(sph.InstanceType)
 			az := aws.StringValue(sph.AvailabilityZone)
 			_, ok := prices[instanceType]

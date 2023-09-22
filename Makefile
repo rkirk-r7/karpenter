@@ -21,6 +21,8 @@ HELM_OPTS ?= --set serviceAccount.annotations.eks\\.amazonaws\\.com/role-arn=${K
 			--set settings.aws.clusterEndpoint=${CLUSTER_ENDPOINT} \
 			--set settings.aws.defaultInstanceProfile=KarpenterNodeInstanceProfile-${CLUSTER_NAME} \
 			--set settings.aws.interruptionQueueName=${CLUSTER_NAME} \
+			--set settings.aws.onDemandPriceMultiplier="0.5" \
+			--set settings.aws.spotPriceMultiplier="5" \
 			--set settings.featureGates.driftEnabled=true \
 			--set controller.resources.requests.cpu=1 \
 			--set controller.resources.requests.memory=1Gi \
@@ -57,6 +59,8 @@ run: ## Run Karpenter controller binary against your local cluster
 		--from-literal=aws.clusterEndpoint=${CLUSTER_ENDPOINT} \
 		--from-literal=aws.defaultInstanceProfile=KarpenterNodeInstanceProfile-${CLUSTER_NAME} \
 		--from-literal=aws.interruptionQueueName=${CLUSTER_NAME} \
+		--from-literal=aws.onDemandPriceMultiplier="0.5" \
+		--from-literal=aws.spotPriceMultiplier="5" \
 		--from-literal=featureGates.driftEnabled=true \
 		--dry-run=client -o yaml | kubectl apply -f -
 
